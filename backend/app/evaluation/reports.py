@@ -43,7 +43,15 @@ def aggregate(cases: list[dict[str, Any]]) -> dict[str, Any]:
                 "p50": float(np.percentile(times, 50)) if times else None,
                 "p95": float(np.percentile(times, 95)) if times else None,
             }
-        strategies[strategy] = {"metrics": values, "latencies_ms": latencies, "cases": len(rows)}
+        strategies[strategy] = {
+            "metrics": values,
+            "metric_counts": {
+                metric: sum(r.get("metrics", {}).get(metric) is not None for r in rows)
+                for metric in METRICS
+            },
+            "latencies_ms": latencies,
+            "cases": len(rows),
+        }
     deltas, intervals = {}, {}
     for metric in METRICS:
         a, b = [strategies[s]["metrics"][metric] for s in ("baseline", "enhanced")]

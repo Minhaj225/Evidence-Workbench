@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     max_selected_documents: int = Field(20, ge=1, le=20)
     generation_timeout_seconds: float = Field(60, gt=0)
     generation_concurrency: int = Field(1, ge=1)
+    gemini_requests_per_minute: float = Field(5, gt=0)
     cors_origins: str = "http://localhost:5173"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

@@ -18,6 +18,8 @@ class JsonFormatter(logging.Formatter):
             "stage",
             "duration_ms",
             "error_code",
+            "error_type",
+            "case_id",
             "version",
         ):
             if hasattr(record, key):

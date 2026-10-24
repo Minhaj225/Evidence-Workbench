@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": process.env.API_URL || "https://evidence-workbench-backend.vercel.app",
+      "/api": process.env.API_URL || "http://127.0.0.1:8000",
     },
   },
   test: {

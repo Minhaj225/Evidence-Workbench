@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import platform
 import subprocess
@@ -19,10 +20,18 @@ from backend.app.errors import AppError
 from backend.app.evaluation.dataset import Case, file_digest, load_dataset
 from backend.app.evaluation.metrics import retrieval_metrics
 from backend.app.evaluation.reports import aggregate, write_report
+from backend.app.generation.client import provider_error
 from backend.app.generation.prompts import VERSION as PROMPT_VERSION
 from backend.app.models import Document, EvaluationRun, new_id, now
 from backend.app.retrieval.service import retrieve
 from scripts.download_corpus import ROOT
+
+TERMINAL_PROVIDER_ERRORS = {
+    "generation_quota_exhausted",
+    "generation_authentication",
+    "generation_model_unavailable",
+    "generation_not_configured",
+}
 
 
 class CitationJudgment(BaseModel):
@@ -32,8 +41,19 @@ class CitationJudgment(BaseModel):
 
 
 class Judge:
-    def __init__(self, settings: Any, client: Any):
+    def __init__(self, settings: Any, client: Any, *, rate_limiter: Any = None):
+        from langchain_core.rate_limiters import InMemoryRateLimiter
+
         self.settings, self.client = settings, client
+        self.rate_limiter = (
+            rate_limiter
+            if rate_limiter is not None
+            else InMemoryRateLimiter(
+                requests_per_second=settings.gemini_requests_per_minute / 60,
+                check_every_n_seconds=0.01,
+                max_bucket_size=1,
+            )
+        )
         self.metrics: list[Any] | None = None
 
     async def score(self, case: Case, answer: Any, sources: list[Any]) -> dict[str, Any]:
@@ -52,6 +72,7 @@ class Judge:
                 LLMContextPrecisionWithReference,
                 LLMContextRecall,
             )
+            from ragas.run_config import RunConfig
 
             if self.metrics is None:
                 llm = LangchainLLMWrapper(
@@ -60,8 +81,10 @@ class Judge:
                         google_api_key=self.settings.gemini_api_key,
                         vertexai=False,
                         timeout=self.settings.generation_timeout_seconds,
-                        max_retries=0,
-                    )
+                        max_retries=1,
+                        rate_limiter=self.rate_limiter,
+                    ),
+                    run_config=RunConfig(max_retries=1),
                 )
                 self.metrics = [
                     Faithfulness(llm=llm),
@@ -78,15 +101,15 @@ class Judge:
                 ("faithfulness", "context_precision", "context_recall"), self.metrics, strict=True
             ):
                 score = float(
-                    await metric.single_turn_ascore(
-                        sample, timeout=self.settings.generation_timeout_seconds
-                    )
+                    # Each provider call has a timeout; pacing must not consume a metric deadline.
+                    await metric.single_turn_ascore(sample)
                 )
                 if not np.isfinite(score) or not 0 <= score <= 1:
                     raise AppError(
                         "evaluation_judge_invalid", "Evaluator returned an invalid score.", 502
                     )
                 values[name] = score
+        await self.rate_limiter.aacquire()
         response = await self.client.models.generate_content(
             model=self.settings.gemini_evaluator_model,
             config=types.GenerateContentConfig(
@@ -204,6 +227,7 @@ class Evaluator:
                     ).version,
                     "generation_model": self.state.settings.gemini_generation_model,
                     "evaluator_model": self.state.settings.gemini_evaluator_model,
+                    "gemini_requests_per_minute": self.state.settings.gemini_requests_per_minute,
                     "baseline_version": baseline.VERSION,
                     "semantic_version": semantic.VERSION,
                     "prompt_version": PROMPT_VERSION,
@@ -330,7 +354,11 @@ class Evaluator:
                 self.state.reranker,
                 self.state.store,
             )
-            judge = Judge(self.state.settings, self.state.generator.client)
+            judge = Judge(
+                self.state.settings,
+                self.state.generator.client,
+                rate_limiter=self.state.generator.rate_limiter,
+            )
             schedule = [(s, c) for s in ("baseline", "enhanced") for c in cases if c.answerable]
             schedule += [("enhanced", c) for c in cases if not c.answerable]
             case_file = directory / "cases.jsonl"
@@ -338,6 +366,18 @@ class Evaluator:
                 # Resume only terminal rows already persisted by this exact queued run.
                 records = [json.loads(line) for line in case_file.read_text().splitlines()]
             completed = {(r["strategy"], r["id"]) for r in records}
+            provider_failure = next(
+                (
+                    AppError(
+                        r["error_code"],
+                        r.get("error_message")
+                        or "Hosted requests skipped after an earlier provider failure.",
+                    )
+                    for r in records
+                    if r.get("error_code") in TERMINAL_PROVIDER_ERRORS
+                ),
+                None,
+            )
             for strategy, case in schedule:
                 if (strategy, case.id) in completed:
                     continue
@@ -350,6 +390,7 @@ class Evaluator:
                     "error_code": None,
                 }
                 start = perf_counter()
+                stage = "retrieval"
                 try:
                     sources, row["timings_ms"] = await retrieve(
                         case.question,
@@ -369,18 +410,40 @@ class Evaluator:
                                 row["retrieved"], [e.model_dump() for e in case.evidence]
                             )
                         )
+                    stage = "generation"
+                    if provider_failure is not None:
+                        raise provider_failure
                     generation_start = perf_counter()
                     answer, row["usage"] = await self.state.generator.answer(case.question, sources)
                     row["timings_ms"]["generation"] = (perf_counter() - generation_start) * 1000
                     row.update(answer.model_dump())
                     row["metrics"]["citation_validity"] = 1.0
+                    stage = "judging"
                     judged = await judge.score(case, answer, sources)
                     row["abstention_supported"] = judged.pop("abstention_supported")
                     row["metrics"].update(judged)
                 except Exception as exc:
-                    row["error_code"] = (
-                        exc.code if isinstance(exc, AppError) else "evaluation_failed"
+                    error = provider_error(
+                        exc,
+                        fallback="evaluation_judge_failed"
+                        if stage == "judging"
+                        else "evaluation_failed",
                     )
+                    row.update(
+                        error_code=error.code, error_message=error.message, error_stage=stage
+                    )
+                    logging.getLogger("rag").warning(
+                        "evaluation_case_failed",
+                        extra={
+                            "run_id": run_id,
+                            "stage": stage,
+                            "error_code": error.code,
+                            "error_type": type(exc).__name__,
+                            "case_id": case.id,
+                        },
+                    )
+                    if error.code in TERMINAL_PROVIDER_ERRORS:
+                        provider_failure = error
                 row["timings_ms"]["total"] = (perf_counter() - start) * 1000
                 with case_file.open("a") as output:
                     output.write(json.dumps(row, allow_nan=False) + "\n")

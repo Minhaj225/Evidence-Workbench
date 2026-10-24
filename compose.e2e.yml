@@ -3,6 +3,7 @@ services:
     environment:
       APP_ENV: test
       GEMINI_API_KEY: ""
+      GEMINI_REQUESTS_PER_MINUTE: 600000
       BASELINE_COLLECTION: fixture_baseline
       SEMANTIC_COLLECTION: fixture_semantic
     command: ["uvicorn", "backend.tests.fixtures.browser_app:create_fixture_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

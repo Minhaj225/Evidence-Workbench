@@ -58,6 +58,8 @@ export type Report = {
     string,
     {
       metrics: Metrics;
+      cases?: number;
+      metric_counts?: Record<string, number>;
       latencies_ms: Record<string, { p50: number | null; p95: number | null }>;
     }
   >;
@@ -67,6 +69,7 @@ export type Report = {
 };
 export type CaseResult = {
   id: string;
+  answerable: boolean;
   question: string;
   reference_answer: string;
   corpus_group: string;
@@ -75,6 +78,8 @@ export type CaseResult = {
   strategy: string;
   answer?: string;
   error_code: string | null;
+  error_message?: string;
+  error_stage?: string;
   metrics: Metrics;
   evidence: { page: number; text: string; document_id: string }[];
   retrieved: {

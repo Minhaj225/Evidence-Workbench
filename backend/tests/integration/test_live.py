@@ -6,6 +6,8 @@ import pytest
 from backend.app.chunking.baseline import chunk
 from backend.app.chunking.types import SourceBlock
 from backend.app.config import Settings
+from backend.app.evaluation.dataset import Case
+from backend.app.evaluation.runner import Judge
 from backend.app.generation.client import Generator
 from backend.app.retrieval.service import Retrieved
 from backend.app.schemas import Citation
@@ -44,5 +46,25 @@ async def test_live_grounded_schema():
         )
         assert not answer.insufficient_context and answer.used_source_ids == ["S1"]
         assert usage["output_tokens"] > 0
+        case = Case(
+            id="smoke",
+            answerable=True,
+            question="What was the launch year?",
+            reference_answer="The launch year was 2020.",
+            topic="launch",
+            question_type="definition",
+            difficulty="easy",
+            corpus_group="100",
+            evidence=[],
+        )
+        scores = await Judge(
+            settings,
+            generator.client,
+            rate_limiter=generator.rate_limiter,
+        ).score(case, answer, [Retrieved(source, citation)])
+        assert scores["faithfulness"] == 1.0
+        assert scores["context_precision"] == pytest.approx(1.0)
+        assert scores["context_recall"] == 1.0
+        assert scores["citation_coverage"] == 1.0
     finally:
         await generator.close()

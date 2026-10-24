@@ -295,3 +295,49 @@ test("API handles empty success and safe errors", async () => {
     "Request failed (500).",
   );
 });
+
+test("evaluation explains unavailable judged metrics and provider failures", async () => {
+  setup("/evaluation", (url) =>
+    url === `/api/evaluations/${id}/report`
+      ? {
+          ...report,
+          errors: {
+            generation_rate_limited: 35,
+            generation_invalid_citations: 4,
+          },
+          strategies: {
+            ...report.strategies,
+            enhanced: {
+              ...report.strategies.enhanced,
+              cases: 30,
+              metric_counts: { faithfulness: 20 },
+            },
+          },
+        }
+      : undefined,
+  );
+  expect(
+    await screen.findByText(/Gemini request quota exceeded/),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/35 cases/)).toBeInTheDocument();
+  expect(screen.getByText(/20 of 30/)).toBeInTheDocument();
+});
+
+test("older reports derive judge coverage from preserved cases", async () => {
+  setup("/evaluation", (url) =>
+    url.endsWith("format=cases")
+      ? JSON.stringify({
+          id: "q-001",
+          question: "What are the functions?",
+          reference_answer: "Four functions.",
+          answerable: true,
+          strategy: "enhanced",
+          metrics: { faithfulness: 1 },
+          evidence: [],
+          retrieved: [],
+          error_code: null,
+        })
+      : undefined,
+  );
+  expect(await screen.findByText(/1 of 1 cases scored/)).toBeInTheDocument();
+});

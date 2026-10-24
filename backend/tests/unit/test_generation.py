@@ -98,6 +98,24 @@ async def test_repair_exhausted(settings):
         (errors.APIError(400, {"error": {"message": "secret"}}), "generation_unavailable"),
         (errors.APIError(401, {"error": {"message": "secret"}}), "generation_authentication"),
         (errors.APIError(403, {"error": {"message": "secret"}}), "generation_authentication"),
+        (
+            errors.APIError(
+                400,
+                {
+                    "error": {
+                        "message": "secret",
+                        "details": [
+                            {
+                                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                                "reason": "API_KEY_INVALID",
+                            }
+                        ],
+                    }
+                },
+            ),
+            "generation_authentication",
+        ),
+        (errors.APIError(404, {"error": {"message": "secret"}}), "generation_model_unavailable"),
         (errors.APIError(503, {"error": {"message": "secret"}}), "generation_unavailable"),
         (errors.APIError(504, {"error": {"message": "secret"}}), "generation_timeout"),
         (httpx.ConnectError("secret"), "generation_unavailable"),
@@ -223,3 +241,72 @@ async def test_sdk_request_and_response(settings, monkeypatch):
     finally:
         await generator.close()
     close_transport.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("quota_id", "code"),
+    [
+        ("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "generation_quota_exhausted"),
+        ("GenerateRequestsPerMinutePerProjectPerModel-FreeTier", "generation_rate_limited"),
+    ],
+)
+async def test_quota_errors_distinguish_daily_exhaustion(settings, quota_id, code):
+    error = errors.APIError(
+        429,
+        {
+            "error": {
+                "message": "secret",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [{"quotaId": quota_id}],
+                    }
+                ],
+            }
+        },
+    )
+    with pytest.raises(AppError, match=code) as caught:
+        await Generator(settings, provider(side_effect=error)).answer("What?", [])
+    assert "secret" not in caught.value.message
+
+
+async def test_generation_and_citation_judging_share_request_budget(settings):
+    from time import monotonic
+
+    from backend.app.evaluation.dataset import Case
+    from backend.app.evaluation.runner import Judge
+    from scripts.download_corpus import ROOT
+
+    times = []
+
+    async def generate(**kwargs):
+        times.append(monotonic())
+        if len(times) == 1:
+            return response(generated("Insufficient evidence.", [], True))
+        return types.GenerateContentResponse(
+            candidates=[
+                types.Candidate(
+                    finish_reason="STOP",
+                    content=types.Content(
+                        parts=[
+                            types.Part(
+                                text=(
+                                    '{"factual_sentences":0,"cited_factual_sentences":0,"abstention_supported":true}'
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+
+    settings = settings.model_copy(update={"gemini_requests_per_minute": 600})
+    generator = Generator(settings, provider(side_effect=generate))
+    judge = Judge(settings, generator.client, rate_limiter=generator.rate_limiter)
+    case = Case.model_validate_json(
+        (ROOT / "evaluation/dataset.jsonl").read_text().splitlines()[-1]
+    )
+    answer, _ = await generator.answer(case.question, [])
+    scores = await judge.score(case, answer, [])
+    assert scores["abstention_supported"] is True
+    assert len(times) == 2 and times[1] - times[0] >= 0.09

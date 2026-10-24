@@ -15,6 +15,27 @@ import type { CaseResult, Report, Run } from "../types";
 import MetricCard from "../components/MetricCard";
 import ComparisonTable, { labels } from "../components/ComparisonTable";
 
+const errorReasons: Record<string, string> = {
+  generation_rate_limited:
+    "Gemini request quota exceeded. Check AI Studio limits and reduce the request rate before a new run.",
+  generation_quota_exhausted:
+    "Gemini daily quota exhausted. Wait for the quota reset before a new run.",
+  generation_not_configured:
+    "This run had no Gemini API key. Update .env, recreate the API container, and start a new run.",
+  generation_authentication:
+    "Gemini rejected the API credentials. Check the server configuration.",
+  generation_model_unavailable:
+    "The configured Gemini model is unavailable to this project.",
+  generation_invalid_citations:
+    "Generated citations failed validation after a repair attempt.",
+  generation_invalid_schema: "Gemini returned an incomplete or invalid answer.",
+  generation_timeout: "A Gemini request timed out.",
+  evaluation_failed:
+    "An evaluation step failed. Inspect the per-question results.",
+  evaluation_judge_failed: "The judge could not complete its assessment.",
+  evaluation_judge_invalid: "The judge returned an invalid assessment.",
+};
+
 export default function EvaluationPage() {
   const client = useQueryClient();
   const [selected, setSelected] = useState("");
@@ -89,6 +110,14 @@ export default function EvaluationPage() {
           : row[key as keyof CaseResult] === value),
     ),
   );
+  const enhanced = report.data?.strategies.enhanced;
+  const enhancedCases = cases.data?.filter(
+    (row) => row.strategy === "enhanced" && row.answerable,
+  );
+  const scored =
+    enhanced?.metric_counts?.faithfulness ??
+    enhancedCases?.filter((row) => row.metrics.faithfulness != null).length;
+  const expected = enhanced?.cases ?? enhancedCases?.length;
   return (
     <>
       <div className="page-heading">
@@ -165,6 +194,22 @@ export default function EvaluationPage() {
       )}
       {report.data && (
         <>
+          {Object.keys(report.data.errors).length > 0 && (
+            <div className="notice error" role="alert">
+              <strong>Why this run has missing scores</strong>
+              <p>
+                Judged metrics stay unavailable until every required case has a
+                score. Earlier runs are preserved; fixes apply to new runs.
+              </p>
+              <ul>
+                {Object.entries(report.data.errors).map(([code, count]) => (
+                  <li key={code}>
+                    {count} cases: {errorReasons[code] || code}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="metric-grid">
             <MetricCard
               label="Baseline HitRate@5"
@@ -179,7 +224,11 @@ export default function EvaluationPage() {
             <MetricCard
               label="Enhanced faithfulness"
               value={report.data.strategies.enhanced.metrics.faithfulness}
-              detail="LLM-judged support · target ≥ 85%"
+              detail={
+                scored !== undefined && expected !== undefined
+                  ? `LLM-judged support · ${scored} of ${expected} cases scored · target ≥ 85%`
+                  : "LLM-judged support · target ≥ 85%"
+              }
             />
           </div>
           <ComparisonTable report={report.data} />
@@ -291,6 +340,14 @@ export default function EvaluationPage() {
                 ))}
                 <h3>Generated answer</h3>
                 <p>{row.answer || row.error_code || "Unavailable"}</p>
+                {row.error_code && (
+                  <p className="notice error">
+                    {row.error_stage && `${row.error_stage}: `}
+                    {row.error_message ||
+                      errorReasons[row.error_code] ||
+                      row.error_code}
+                  </p>
+                )}
                 <h3>Retrieved passages</h3>
                 {row.retrieved.map((c) => (
                   <blockquote key={c.id}>

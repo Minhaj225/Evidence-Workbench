@@ -79,12 +79,13 @@ flowchart LR
 
 All application variables and defaults are in [` .env.example`](.env.example). See [configuration details](docs/configuration.md) for their purpose.
 
-Set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) in the server’s `.env`, then restart the API. The default Gemini model currently supports free-tier text input/output. Quotas apply, and Google may use free-tier content to improve its products; see [Google pricing](https://ai.google.dev/gemini-api/docs/pricing).
+Set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) in the server’s `.env`. With Docker, apply changes using `docker compose up -d --build --force-recreate api web`; restarting an existing container does not reload its environment. The default Gemini model currently supports free-tier text input/output. Quotas apply, and Google may use free-tier content to improve its products; see [Google pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 Key settings:
 - `QDRANT_URL=http://qdrant:6333` — Compose default; local needs `http://127.0.0.1:6333`
 - `GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite` — free-tier answer generation
 - `GEMINI_EVALUATOR_MODEL=gemini-3.5-flash-lite` — free-tier evaluation judge
+- `GEMINI_REQUESTS_PER_MINUTE=5` — shared pacing for generation and all judge requests; adjust to your AI Studio quota
 
 ---
 
@@ -130,6 +131,7 @@ Production run `d2905419-562e-4be8-b882-edf9342507a4`, started 2026-10-19.
 - Missing dependency at startup: restore Qdrant/model access and restart API
 - Evaluation rejects missing/stale corpus versions: re-run demo ingestion, wait for ready, start new run
 - Provider auth/timeout/rate-limit/schema errors: correct configuration and run new benchmark
+- Faithfulness unavailable despite a configured key: inspect the evaluation error summary. A single missing judged case makes the aggregate unavailable. Request pacing reduces bursts, but cannot bypass daily/token quotas; a full benchmark at the default rate can take over an hour.
 - `make reset-demo`: deletes only documents whose hashes match the pinned manifest; other uploads remain
 
 ---

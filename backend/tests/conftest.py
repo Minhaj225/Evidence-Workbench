@@ -20,6 +20,7 @@ def settings(tmp_path):
         page_cache_root=tmp_path / "pages",
         artifact_root=tmp_path / "artifacts",
         gemini_api_key="",
+        gemini_requests_per_minute=600000,
     )
 
 
