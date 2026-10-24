@@ -1,0 +1,13 @@
+services:
+  api:
+    environment:
+      APP_ENV: test
+      OPENAI_API_KEY: ""
+      BASELINE_COLLECTION: fixture_baseline
+      SEMANTIC_COLLECTION: fixture_semantic
+    command: ["uvicorn", "backend.tests.fixtures.browser_app:create_fixture_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    ports: !override ["127.0.0.1:18001:8000"]
+  qdrant:
+    ports: !override ["127.0.0.1:16334:6333"]
+  web:
+    ports: !override ["127.0.0.1:18080:8080"]
