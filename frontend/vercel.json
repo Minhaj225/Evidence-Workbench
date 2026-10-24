@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "name": "evidence-workbench-frontend",
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "frontend/dist",
+        "installCommand": "npm --prefix frontend ci",
+        "buildCommand": "npm --prefix frontend run build"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "https://evidence-workbench-backend.vercel.app/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "frontend/dist/$1",
+      "status": 200
+    }
+  ],
+  "env": {
+    "API_URL": "https://evidence-workbench-backend.vercel.app",
+    "NODE_ENV": "production"
+  }
+}

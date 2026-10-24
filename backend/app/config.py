@@ -35,9 +35,9 @@ class Settings(BaseSettings):
 
     @field_validator("database_url")
     @classmethod
-    def sqlite_only(cls, value: str) -> str:
-        if not value.startswith("sqlite:///"):
-            raise ValueError("Only SQLite is supported")
+    def allow_any_url(cls, value: str) -> str:
+        """Allow any valid SQLAlchemy URL; SQLite local overrides via env var."""
+        # Support postgres://, mysql://, mssql://, sqlite:// etc.
         return value
 
     @field_validator("cors_origins")

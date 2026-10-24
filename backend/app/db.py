@@ -17,8 +17,9 @@ def create_database(url: str) -> sessionmaker:
 
     @event.listens_for(engine, "connect")
     def configure_sqlite(connection: Any, record: Any) -> None:
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
+        if str(engine.url).startswith("sqlite"):
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA journal_mode=WAL")
 
     config = Config()
     config.set_main_option("script_location", str(Path(__file__).parents[1] / "alembic"))

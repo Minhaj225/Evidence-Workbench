@@ -3,7 +3,11 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  server: { proxy: { "/api": process.env.API_URL || "http://127.0.0.1:8000" } },
+  server: {
+    proxy: {
+      "/api": process.env.API_URL || "https://evidence-workbench-backend.vercel.app",
+    },
+  },
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],

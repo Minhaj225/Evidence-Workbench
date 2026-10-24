@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "name": "evidence-workbench-backend",
+  "builds": [
+    {
+      "src": "api/health.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxDuration": 60
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/health.py"
+    }
+  ],
+  "env": {
+    "APP_ENV": "production",
+    "APP_HOST": "0.0.0.0",
+    "APP_PORT": "3000",
+    "CORS_ORIGINS": "@cors_origins",
+    "LOG_LEVEL": "INFO",
+    "MAX_UPLOAD_BYTES": "20971520",
+    "MAX_PDF_PAGES": "300",
+    "MAX_QUESTION_CHARS": "2000",
+    "MAX_SELECTED_DOCUMENTS": "20",
+    "GENERATION_TIMEOUT_SECONDS": "60.0",
+    "GENERATION_CONCURRENCY": "4",
+    "EMBEDDING_MODEL": "BAAI/bge-small-en-v1.5",
+    "RERANKER_MODEL": "cross-encoder/ms-marco-MiniLM-L6-v2",
+    "BASELINE_COLLECTION": "rag_baseline_v1",
+    "SEMANTIC_COLLECTION": "rag_semantic_v1",
+    "QDRANT_URL": "@qdrant_url",
+    "QDRANT_API_KEY": "@qdrant_api_key",
+    "OPENAI_API_KEY": "@openai_api_key",
+    "OPENAI_GENERATION_MODEL": "gpt-6-luna",
+    "OPENAI_EVALUATOR_MODEL": "gpt-6.1-sol"
+  }
+}
