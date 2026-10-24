@@ -18,7 +18,7 @@ An evaluation-driven document QA application. Upload text-bearing PDFs or UTF-8 
 
 ```sh
 cp .env.example .env
-# Configure OPENAI_API_KEY in .env locally; never commit it.
+# Configure GEMINI_API_KEY in .env locally; never commit it.
 docker compose up -d --build --wait
 ```
 
@@ -68,7 +68,7 @@ flowchart LR
     Embed --> Vectors[(Qdrant: two collections)]
     API --> Retrieve[Dense search and optional MiniLM reranking]
     Vectors --> Retrieve
-    Retrieve --> Generate[OpenAI Responses and citation validation]
+    Retrieve --> Generate[Gemini structured output and citation validation]
     Generate --> Browser
     Queue --> Evaluate[Frozen dataset and report artifacts]
 ```
@@ -79,10 +79,12 @@ flowchart LR
 
 All application variables and defaults are in [` .env.example`](.env.example). See [configuration details](docs/configuration.md) for their purpose.
 
+Set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) in the server’s `.env`, then restart the API. The default Gemini model currently supports free-tier text input/output. Quotas apply, and Google may use free-tier content to improve its products; see [Google pricing](https://ai.google.dev/gemini-api/docs/pricing).
+
 Key settings:
 - `QDRANT_URL=http://qdrant:6333` — Compose default; local needs `http://127.0.0.1:6333`
-- `OPENAI_GENERATION_MODEL=gpt-6-luna` — follows the plan; override for available models
-- `OPENAI_EVALUATOR_MODEL=gpt-6.1-sol` — follows the plan
+- `GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite` — free-tier answer generation
+- `GEMINI_EVALUATOR_MODEL=gemini-3.5-flash-lite` — free-tier evaluation judge
 
 ---
 

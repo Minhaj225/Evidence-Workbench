@@ -21,15 +21,15 @@ class Settings(BaseSettings):
     semantic_collection: str = "rag_semantic_v1"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
-    openai_api_key: SecretStr = SecretStr("")
-    openai_generation_model: str = "gpt-6-luna"
-    openai_evaluator_model: str = "gpt-6.1-sol"
+    gemini_api_key: SecretStr = SecretStr("")
+    gemini_generation_model: str = "gemini-3.5-flash-lite"
+    gemini_evaluator_model: str = "gemini-3.5-flash-lite"
     max_upload_bytes: int = Field(20971520, gt=0)
     max_pdf_pages: int = Field(300, gt=0)
     max_question_chars: int = Field(2000, ge=3, le=2000)
     max_selected_documents: int = Field(20, ge=1, le=20)
     generation_timeout_seconds: float = Field(60, gt=0)
-    generation_concurrency: int = Field(4, ge=1)
+    generation_concurrency: int = Field(1, ge=1)
     cors_origins: str = "http://localhost:5173"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

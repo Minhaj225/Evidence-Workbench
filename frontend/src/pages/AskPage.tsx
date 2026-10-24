@@ -78,7 +78,7 @@ export default function AskPage() {
         }}
       />
       <p className="privacy-note">
-        Only your question and up to five retrieved passages are sent to OpenAI.
+        Only your question and up to five retrieved passages are sent to Google Gemini.
       </p>
       {answer.error && (
         <div className="notice error" role="alert">

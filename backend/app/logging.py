@@ -33,5 +33,5 @@ def configure_logging(level: str) -> None:
     logger.setLevel(level)
     logger.propagate = False
     # HTTP/provider logs can include request URLs or payloads.
-    for name in ("httpx", "httpcore", "openai"):
+    for name in ("httpx", "httpcore", "google.genai", "langchain_google_genai"):
         logging.getLogger(name).setLevel(logging.CRITICAL)

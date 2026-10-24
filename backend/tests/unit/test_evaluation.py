@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+from google.genai import types
+from pydantic import SecretStr
 
 from backend.app.db import create_database
 from backend.app.errors import AppError
@@ -173,14 +175,118 @@ async def test_judge_schema_and_missing_key(settings):
     with pytest.raises(AppError, match="generation_not_configured"):
         await Judge(settings, None).score(case, answer, [])
     client = SimpleNamespace(
-        responses=SimpleNamespace(
-            parse=AsyncMock(
-                return_value=SimpleNamespace(
-                    output_parsed=SimpleNamespace(
-                        factual_sentences=2, cited_factual_sentences=1, abstention_supported=True
-                    )
-                )
+        models=SimpleNamespace(
+            generate_content=AsyncMock(
+                return_value=types.GenerateContentResponse(
+                    candidates=[
+                        types.Candidate(
+                            finish_reason="STOP",
+                            content=types.Content(
+                                parts=[
+                                    types.Part(
+                                        text=json.dumps(
+                                            {
+                                                "factual_sentences": 2,
+                                                "cited_factual_sentences": 1,
+                                                "abstention_supported": True,
+                                            }
+                                        )
+                                    )
+                                ]
+                            ),
+                        )
+                    ]
+                ),
             )
         )
     )
     assert (await Judge(settings, client).score(case, answer, []))["citation_coverage"] == 0.5
+    assert client.models.generate_content.call_args.kwargs["model"] == "gemini-3.5-flash-lite"
+
+
+async def test_ragas_uses_gemini(settings):
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from ragas.metrics import Faithfulness, LLMContextPrecisionWithReference, LLMContextRecall
+
+    settings = settings.model_copy(update={"gemini_api_key": SecretStr("test")})
+    case = Case.model_validate_json((ROOT / "evaluation/dataset.jsonl").read_text().splitlines()[0])
+    answer = GeneratedAnswer(
+        answer="Supported [S1].", used_source_ids=["S1"], insufficient_context=False
+    )
+    client = SimpleNamespace(
+        models=SimpleNamespace(
+            generate_content=AsyncMock(
+                return_value=types.GenerateContentResponse(
+                    candidates=[
+                        types.Candidate(
+                            finish_reason="STOP",
+                            content=types.Content(
+                                parts=[
+                                    types.Part(
+                                        text=json.dumps(
+                                            {
+                                                "factual_sentences": 1,
+                                                "cited_factual_sentences": 1,
+                                                "abstention_supported": False,
+                                            }
+                                        )
+                                    )
+                                ]
+                            ),
+                        )
+                    ]
+                ),
+            )
+        )
+    )
+    judge = Judge(settings, client)
+    with (
+        patch.object(Faithfulness, "single_turn_ascore", AsyncMock(return_value=0.75)),
+        patch.object(
+            LLMContextPrecisionWithReference, "single_turn_ascore", AsyncMock(return_value=1)
+        ),
+        patch.object(LLMContextRecall, "single_turn_ascore", AsyncMock(return_value=0.5)),
+    ):
+        scores = await judge.score(case, answer, [])
+    assert scores == {
+        "faithfulness": 0.75,
+        "context_precision": 1.0,
+        "context_recall": 0.5,
+        "citation_coverage": 1.0,
+        "abstention_supported": False,
+    }
+    assert isinstance(judge.metrics[0].llm.langchain_llm, ChatGoogleGenerativeAI)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"factual_sentences": 1, "cited_factual_sentences": 2, "abstention_supported": true}',
+        '{"factual_sentences": -1, "cited_factual_sentences": 0, "abstention_supported": true}',
+        "{}",
+        "bad json",
+    ],
+)
+async def test_invalid_gemini_judgment(settings, payload):
+    case = Case.model_validate_json(
+        (ROOT / "evaluation/dataset.jsonl").read_text().splitlines()[-1]
+    )
+    client = SimpleNamespace(
+        models=SimpleNamespace(
+            generate_content=AsyncMock(
+                return_value=types.GenerateContentResponse(
+                    candidates=[
+                        types.Candidate(
+                            finish_reason="STOP",
+                            content=types.Content(parts=[types.Part(text=payload)]),
+                        )
+                    ]
+                ),
+            )
+        )
+    )
+    answer = GeneratedAnswer(
+        answer="Insufficient evidence.", used_source_ids=[], insufficient_context=True
+    )
+    with pytest.raises(AppError, match="evaluation_judge_invalid"):
+        await Judge(settings, client).score(case, answer, [])

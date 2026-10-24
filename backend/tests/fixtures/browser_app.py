@@ -1,10 +1,10 @@
 """Isolated browser fixture. Never used by the production entrypoint."""
 
 import os
-from types import SimpleNamespace
 
 import numpy as np
 from fastapi import FastAPI
+from google.genai import types
 
 from backend.app.config import Settings
 from backend.app.generation.client import Generator
@@ -16,10 +16,10 @@ from backend.tests.fixtures.report import seed_report
 
 class FixtureProvider:
     def __init__(self):
-        self.responses = self
+        self.models = self
 
-    async def parse(self, **kwargs):
-        unsupported = "president of Mars" in kwargs["input"]
+    async def generate_content(self, **kwargs):
+        unsupported = "president of Mars" in kwargs["contents"]
         answer = GeneratedAnswer(
             answer=(
                 "Insufficient evidence in the supplied documents."
@@ -29,14 +29,20 @@ class FixtureProvider:
             used_source_ids=[] if unsupported else ["S1"],
             insufficient_context=unsupported,
         )
-        return SimpleNamespace(
-            output_parsed=answer,
-            output=[],
-            status="completed",
-            usage=SimpleNamespace(input_tokens=20, output_tokens=15),
+        return types.GenerateContentResponse(
+            candidates=[
+                types.Candidate(
+                    content=types.Content(parts=[types.Part(text=answer.model_dump_json())]),
+                    finish_reason="STOP",
+                )
+            ],
+            usage_metadata=types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=20,
+                candidates_token_count=15,
+            ),
         )
 
-    async def close(self):
+    async def aclose(self):
         pass
 
 

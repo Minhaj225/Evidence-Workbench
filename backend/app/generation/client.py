@@ -1,13 +1,9 @@
 import asyncio
 from typing import Any
 
-from openai import (
-    APIError,
-    APITimeoutError,
-    AsyncOpenAI,
-    AuthenticationError,
-    RateLimitError,
-)
+import httpx
+from google import genai
+from google.genai import errors, types
 from pydantic import ValidationError
 
 from backend.app.config import Settings
@@ -21,12 +17,20 @@ from backend.app.schemas import GeneratedAnswer
 class Generator:
     def __init__(self, settings: Settings, client: Any = None):
         self.settings = settings
-        key = settings.openai_api_key.get_secret_value()
+        key = settings.gemini_api_key.get_secret_value()
         self.client = (
             client
             if client is not None
             else (
-                AsyncOpenAI(api_key=key, timeout=settings.generation_timeout_seconds, max_retries=0)
+                genai.Client(
+                    api_key=key,
+                    vertexai=False,
+                    http_options=types.HttpOptions(
+                        timeout=max(1, int(settings.generation_timeout_seconds * 1000)),
+                        retry_options=types.HttpRetryOptions(attempts=1),
+                        async_client_args={"transport": httpx.AsyncHTTPTransport()},
+                    ),
+                ).aio
                 if key
                 else None
             )
@@ -38,53 +42,70 @@ class Generator:
     ) -> tuple[GeneratedAnswer, dict[str, int]]:
         if self.client is None:
             raise AppError(
-                "generation_not_configured", "Answer generation needs a server-side API key.", 503
+                "generation_not_configured",
+                "Answer generation needs a server-side Gemini API key.",
+                503,
             )
         prompt = evidence_prompt(question, sources)
         usage = {"input_tokens": 0, "output_tokens": 0}
         async with self.semaphore:
             for attempt in range(2):
                 try:
-                    response = await self.client.responses.parse(
-                        model=self.settings.openai_generation_model,
-                        instructions=INSTRUCTIONS,
-                        input=prompt,
-                        text_format=GeneratedAnswer,
-                        store=False,
+                    response = await self.client.models.generate_content(
+                        model=self.settings.gemini_generation_model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=INSTRUCTIONS,
+                            response_mime_type="application/json",
+                            response_json_schema=GeneratedAnswer.model_json_schema(),
+                        ),
                     )
-                    if response.usage:
-                        usage["input_tokens"] += response.usage.input_tokens
-                        usage["output_tokens"] += response.usage.output_tokens
-                    if any(
-                        getattr(part, "type", "") == "refusal"
-                        for item in response.output
-                        for part in getattr(item, "content", [])
+                    if response.usage_metadata:
+                        usage["input_tokens"] += response.usage_metadata.prompt_token_count or 0
+                        usage["output_tokens"] += (
+                            response.usage_metadata.candidates_token_count or 0
+                        )
+                    candidates = response.candidates or []
+                    if (response.prompt_feedback and response.prompt_feedback.block_reason) or any(
+                        c.finish_reason
+                        in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}
+                        for c in candidates
                     ):
                         raise AppError(
                             "generation_refused", "The provider declined this request.", 502
                         )
-                    if response.status != "completed" or response.output_parsed is None:
+                    if not candidates or candidates[0].finish_reason != "STOP" or not response.text:
                         raise AppError(
                             "generation_invalid_schema",
                             "The provider returned an incomplete answer.",
                             502,
                         )
-                    answer = GeneratedAnswer.model_validate(response.output_parsed)
+                    answer = GeneratedAnswer.model_validate_json(response.text)
                     validate_citations(answer, {s.citation.source_id for s in sources})
                     return answer, usage
-                except APITimeoutError as exc:
+                except (httpx.TimeoutException, TimeoutError) as exc:
                     raise AppError(
                         "generation_timeout", "Answer generation timed out.", 504
                     ) from exc
-                except RateLimitError as exc:
+                except errors.APIError as exc:
+                    if exc.code in {408, 504}:
+                        raise AppError(
+                            "generation_timeout", "Answer generation timed out.", 504
+                        ) from exc
+                    if exc.code == 429:
+                        raise AppError(
+                            "generation_rate_limited",
+                            "Gemini quota exceeded; wait and try again later.",
+                            429,
+                        ) from exc
+                    if exc.code in {401, 403}:
+                        raise AppError(
+                            "generation_authentication", "Provider credentials were rejected.", 503
+                        ) from exc
                     raise AppError(
-                        "generation_rate_limited", "The provider is busy; try again later.", 429
+                        "generation_unavailable", "The generation provider is unavailable.", 502
                     ) from exc
-                except AuthenticationError as exc:
-                    raise AppError(
-                        "generation_authentication", "Provider credentials were rejected.", 503
-                    ) from exc
-                except APIError as exc:
+                except httpx.RequestError as exc:
                     raise AppError(
                         "generation_unavailable", "The generation provider is unavailable.", 502
                     ) from exc
@@ -107,4 +128,4 @@ class Generator:
 
     async def close(self) -> None:
         if self.client is not None:
-            await self.client.close()
+            await self.client.aclose()

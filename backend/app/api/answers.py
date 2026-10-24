@@ -54,7 +54,7 @@ async def answer_question(body: AnswerRequest, request: Request) -> dict:
             if s.citation.source_id in generated.used_source_ids
         ],
         "timings_ms": timings,
-        "model": state.settings.openai_generation_model,
+        "model": state.settings.gemini_generation_model,
         "prompt_version": VERSION,
         "usage": usage,
     }

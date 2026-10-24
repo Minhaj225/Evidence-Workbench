@@ -14,11 +14,11 @@ from backend.tests.fixtures.adapters import WordTokenizer
 
 @pytest.mark.live
 @pytest.mark.skipif(
-    os.environ.get("RUN_LIVE_OPENAI_TESTS") != "1", reason="Explicit opt-in required"
+    os.environ.get("RUN_LIVE_GEMINI_TESTS") != "1", reason="Explicit opt-in required"
 )
 async def test_live_grounded_schema():
     settings = Settings()
-    assert settings.openai_api_key.get_secret_value(), "Configure OPENAI_API_KEY locally"
+    assert settings.gemini_api_key.get_secret_value(), "Configure GEMINI_API_KEY locally"
     document_id = str(uuid4())
     source = chunk(
         [SourceBlock(document_id, 1, 0, "The launch year was 2020.", source_end=25)],

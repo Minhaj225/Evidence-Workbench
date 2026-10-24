@@ -62,7 +62,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {health.data?.components.generation === "degraded" && (
           <div className="notice">
             Document processing is available. Answer generation needs a
-            server-side OpenAI API key.
+            server-side Google Gemini API key.
           </div>
         )}
         <main id="main" tabIndex={-1}>

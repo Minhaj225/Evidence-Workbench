@@ -19,7 +19,7 @@ def settings(tmp_path):
         document_root=tmp_path / "documents",
         page_cache_root=tmp_path / "pages",
         artifact_root=tmp_path / "artifacts",
-        openai_api_key="",
+        gemini_api_key="",
     )
 
 
